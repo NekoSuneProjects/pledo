@@ -33,6 +33,11 @@ export class Downloads extends Component {
     this.populateData();
   }
 
+  async cancelAllPendingDownloads() {
+    await fetch("api/download/pending", { method: "DELETE" });
+    this.populateData();
+  }
+
   renderStatus(download) {
     if (download.started && !download.finished) {
       return (
@@ -103,6 +108,8 @@ export class Downloads extends Component {
   }
 
   render() {
+    const pendingQueueCount = this.state.downloads.filter((download) => !download.started && !download.finished).length;
+
     return (
       <div className="space-y-8">
         <section className="surface p-6 sm:p-8">
@@ -115,9 +122,19 @@ export class Downloads extends Component {
                 still moving through the queue.
               </p>
             </div>
-            <button type="button" className="btn-secondary" onClick={() => this.clearDownloadHistory()}>
-              Clear Old History
-            </button>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                className="btn-danger disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={pendingQueueCount === 0}
+                onClick={() => this.cancelAllPendingDownloads()}
+              >
+                Cancel All Pending
+              </button>
+              <button type="button" className="btn-secondary" onClick={() => this.clearDownloadHistory()}>
+                Clear Old History
+              </button>
+            </div>
           </div>
         </section>
 

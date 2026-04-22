@@ -6,6 +6,7 @@ public interface IDownloadService
 {
     IReadOnlyCollection<DownloadElement> GetPendingDownloads();
     IReadOnlyCollection<DownloadElement> GetAll();
+    Task CancelAllPendingDownloads();
     Task RemoveAllFinishedOrCancelledDownloads();
     Task DownloadMovie(string key, string? mediaFileKey, string? serverId);
     Task DownloadEpisode(string key, string? mediaFileKey, string? serverId);

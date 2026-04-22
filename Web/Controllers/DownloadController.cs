@@ -37,6 +37,13 @@ public class DownloadController : ControllerBase
         return NoContent();
     }
 
+    [HttpDelete("pending")]
+    public async Task<IActionResult> CancelAllPendingDownloads()
+    {
+        await _downloadService.CancelAllPendingDownloads();
+        return NoContent();
+    }
+
     [HttpPost("movie/{key}")]
     public async Task DownloadMovie(string key, [FromQuery] string? mediaFileKey, [FromQuery] string? serverId)
     {

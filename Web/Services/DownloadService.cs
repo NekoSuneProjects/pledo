@@ -72,6 +72,23 @@ namespace Web.Services
             }
         }
 
+        public Task CancelAllPendingDownloads()
+        {
+            lock (_pendingDownloadsLock)
+            {
+                var queuedDownloads = _pendingDownloads
+                    .Where(x => x.Started == null && x.Finished == null)
+                    .ToList();
+
+                foreach (var queuedDownload in queuedDownloads)
+                {
+                    _pendingDownloads.Remove(queuedDownload);
+                }
+            }
+
+            return Task.CompletedTask;
+        }
+
         private async Task<DownloadElement> CreateDownloadElement(string key, string? mediaFileKey, ElementType elementType,
             string? serverId)
         {
