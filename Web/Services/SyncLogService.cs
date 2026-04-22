@@ -58,35 +58,53 @@ public class SyncLogService : ISyncLogService
         });
     }
 
-    public async Task<IReadOnlyCollection<SyncLogEntryResource>> GetRecentEntries(int take = 100)
+    public async Task<SyncLogPageResource> GetEntries(int skip = 0, int take = 100)
     {
+        skip = Math.Max(0, skip);
         take = Math.Max(1, take);
 
         try
         {
             await _semaphore.WaitAsync();
             if (!File.Exists(_logPath))
-                return Array.Empty<SyncLogEntryResource>();
+                return new SyncLogPageResource();
 
             var lines = await File.ReadAllLinesAsync(_logPath);
-            return lines
+            var orderedEntries = lines
                 .Where(line => !string.IsNullOrWhiteSpace(line))
                 .Select(ParseLine)
                 .Where(entry => entry != null)
-                .TakeLast(take)
-                .Reverse()
                 .Cast<SyncLogEntryResource>()
+                .Reverse()
                 .ToList();
+
+            var items = orderedEntries
+                .Skip(skip)
+                .Take(take)
+                .ToList();
+
+            return new SyncLogPageResource
+            {
+                Items = items,
+                TotalItems = orderedEntries.Count,
+                HasMore = skip + items.Count < orderedEntries.Count
+            };
         }
         catch (Exception exception)
         {
             _logger.LogError(exception, "Failed to read sync log entries.");
-            return Array.Empty<SyncLogEntryResource>();
+            return new SyncLogPageResource();
         }
         finally
         {
             _semaphore.Release();
         }
+    }
+
+    public async Task<IReadOnlyCollection<SyncLogEntryResource>> GetRecentEntries(int take = 100)
+    {
+        var page = await GetEntries(0, take);
+        return page.Items;
     }
 
     private async Task TrimIfNeeded()

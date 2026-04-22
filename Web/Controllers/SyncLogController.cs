@@ -16,8 +16,8 @@ public class SyncLogController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IEnumerable<SyncLogEntryResource>> Get([FromQuery] int take = 100)
+    public async Task<SyncLogPageResource> Get([FromQuery] int skip = 0, [FromQuery] int take = 24)
     {
-        return await _syncLogService.GetRecentEntries(take);
+        return await _syncLogService.GetEntries(skip, take);
     }
 }

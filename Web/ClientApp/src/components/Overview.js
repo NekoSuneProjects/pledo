@@ -10,6 +10,10 @@ export class Overview extends Component {
       account: null,
       servers: null,
       syncLogs: [],
+      syncLogHasMore: false,
+      syncLogLoading: false,
+      syncLogTake: 24,
+      syncLogTotalItems: 0,
       syncSettings: {
         automaticSyncEnabled: true,
         automaticSyncIntervalMinutes: 15,
@@ -98,6 +102,7 @@ export class Overview extends Component {
     const syncLabel = this.state.syncSettings.automaticSyncEnabled
       ? `Auto scan every ${this.state.syncSettings.automaticSyncIntervalMinutes} min`
       : "Auto scan disabled";
+    const visibleSyncLogs = this.state.syncLogs.length;
 
     return (
       <div className="space-y-8">
@@ -157,16 +162,38 @@ export class Overview extends Component {
             <div>
               <p className="eyebrow">Recent Activity</p>
               <h2 className="mt-2 text-2xl font-semibold text-white">Automatic sync log</h2>
+              <p className="mt-2 text-sm text-slate-400">
+                Showing {visibleSyncLogs} of {this.state.syncLogTotalItems} logged sync events.
+              </p>
             </div>
-            <button type="button" className="btn-secondary" onClick={() => this.populateSyncLogs()}>
+            <button
+              type="button"
+              className="btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={this.state.syncLogLoading}
+              onClick={() => this.populateSyncLogs()}
+            >
               Refresh Logs
             </button>
           </div>
           {this.state.syncLogs.length === 0 ? (
             <div className="empty-state">No sync events yet. New movies, TV shows, removals, and server status changes will appear here.</div>
           ) : (
-            <div className="space-y-3">
-              {this.state.syncLogs.map((entry, index) => this.renderSyncLogEntry(entry, index))}
+            <div className="space-y-4">
+              <div className="space-y-3">
+                {this.state.syncLogs.map((entry, index) => this.renderSyncLogEntry(entry, index))}
+              </div>
+              {this.state.syncLogHasMore ? (
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    className="btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={this.state.syncLogLoading}
+                    onClick={() => this.loadMoreSyncLogs()}
+                  >
+                    {this.state.syncLogLoading ? "Loading..." : "Show Older Logs"}
+                  </button>
+                </div>
+              ) : null}
             </div>
           )}
         </section>
@@ -285,10 +312,25 @@ export class Overview extends Component {
     }
   }
 
-  async populateSyncLogs() {
-    const response = await fetch("api/synclog?take=12");
-    const data = await response.json();
-    this.setState({ syncLogs: data ?? [] });
+  async populateSyncLogs(syncLogTake = this.state.syncLogTake) {
+    this.setState({ syncLogLoading: true });
+
+    try {
+      const response = await fetch(`api/synclog?skip=0&take=${syncLogTake}`);
+      const data = await response.json();
+      this.setState({
+        syncLogs: data?.items ?? [],
+        syncLogHasMore: Boolean(data?.hasMore),
+        syncLogTake,
+        syncLogTotalItems: data?.totalItems ?? 0,
+      });
+    } finally {
+      this.setState({ syncLogLoading: false });
+    }
+  }
+
+  async loadMoreSyncLogs() {
+    await this.populateSyncLogs(this.state.syncLogTake + 24);
   }
 
   async populateSyncSettings() {
