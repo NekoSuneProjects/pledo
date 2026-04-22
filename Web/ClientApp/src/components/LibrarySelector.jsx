@@ -1,81 +1,94 @@
-import React, {useEffect, useState} from "react"
-import {Selection} from "./Selection";
-import {Col, Container, Row} from "reactstrap";
+import React, { useEffect, useMemo, useState } from "react";
+import { Selection } from "./Selection";
 
-export function LibrarySelector(props) {
+export function LibrarySelector({ mediaType, onServerSelected, onLibrarySelected }) {
+  const [selectedServerId, setSelectedServerId] = useState("");
+  const [selectedLibraryId, setSelectedLibraryId] = useState("");
+  const [libraryData, setLibraryData] = useState({ servers: [], libraries: [], loading: true });
 
-    const [selectedServer, setSelectedServer] = useState(null);
-    const [libraryData, setLibraryData] = useState({servers: [], libraries: []});
+  useEffect(() => {
+    const fetchData = async () => {
+      const uri = "api/library?" + new URLSearchParams({ mediaType });
+      const response = await fetch(uri);
+      const data = await response.json();
+      const uniqueServers = data
+        .map((library) => library.server)
+        .filter((server, index, self) => index === self.findIndex((entry) => entry.id === server.id));
 
-    useEffect(() => {
-        const fetchData = async () => {
-            const uri = 'api/library?' + new URLSearchParams({
-                mediaType: props.mediaType
-            });
-            const response = await fetch(uri);
-            const data = await response.json();
-            const uniqueServer = data.map(x => x.server).filter(function (v, i, self) {
-                return i === self.findIndex(x => x.id === v.id);
-            });
-            console.log(`Received ${data.length} libraries`)
-            return {
-                libraries: data,
-                servers: uniqueServer
-            }
-        }
+      setLibraryData({
+        libraries: data,
+        servers: uniqueServers,
+        loading: false,
+      });
+    };
 
-        fetchData().then(result => {
-            setLibraryData(result)
-        })
-            // make sure to catch any error
-            .catch(console.error);
-    }, []);
+    fetchData().catch((error) => {
+      console.error(error);
+      setLibraryData({ servers: [], libraries: [], loading: false });
+    });
+  }, [mediaType]);
 
-    useEffect(() => {
-        const filteredLibraries = libraryData.libraries.filter(lib => lib.serverId === selectedServer?.id)
-        if (filteredLibraries?.length > 0)
-            props.onLibrarySelected(filteredLibraries[0].id)
-    }, [libraryData, selectedServer]);
-
-    if (libraryData.libraries === undefined)
-        return null;
-    if (selectedServer == null && libraryData.servers.length > 0) {
-        setSelectedServer(libraryData.servers[0])
-        props.onServerSelected(libraryData.servers[0])
+  useEffect(() => {
+    if (!selectedServerId && libraryData.servers.length > 0) {
+      setSelectedServerId(libraryData.servers[0].id);
     }
+  }, [libraryData.servers, selectedServerId]);
 
-    const filteredLibraries = libraryData.libraries.filter(lib => lib.serverId === selectedServer?.id)
-    const serverList = libraryData.servers.map((server) =>
-        ({label: server.name, value: server.id}))
-    const librariesList = filteredLibraries.map((library) =>
-        ({
-            label: library.name,
-            value: library.id
-        })
-    )
+  useEffect(() => {
+    const selectedServer = libraryData.servers.find((server) => server.id === selectedServerId) ?? null;
+    onServerSelected(selectedServer);
 
-    return (
-        <Container>
-            <Row>
-                <Col xs="auto">
-                    <Selection name="servers"
-                               title="Select server"
-                               items={serverList}
-                               onChange={serverId => {
-                                   const server = libraryData.servers.find(x => x.id === serverId)
-                                   props.onServerSelected(server)
-                                   setSelectedServer(server)
-                               }}
-                    />
-                </Col>
-                <Col>
-                    <Selection name="libraries"
-                               title="select libraries"
-                               items={librariesList}
-                               onChange={library => props.onLibrarySelected(library)}
-                    />
-                </Col>
-            </Row>
-        </Container>
-    )
+    const matchingLibraries = libraryData.libraries.filter((library) => library.serverId === selectedServerId);
+    const nextLibraryId = matchingLibraries[0]?.id ?? "";
+    if (nextLibraryId !== selectedLibraryId) {
+      setSelectedLibraryId(nextLibraryId);
+    }
+  }, [libraryData.libraries, libraryData.servers, onServerSelected, selectedLibraryId, selectedServerId]);
+
+  useEffect(() => {
+    onLibrarySelected(selectedLibraryId || null);
+  }, [onLibrarySelected, selectedLibraryId]);
+
+  const serverOptions = useMemo(
+    () => libraryData.servers.map((server) => ({ label: server.name, value: server.id })),
+    [libraryData.servers]
+  );
+  const libraryOptions = useMemo(
+    () =>
+      libraryData.libraries
+        .filter((library) => library.serverId === selectedServerId)
+        .map((library) => ({ label: library.name, value: library.id })),
+    [libraryData.libraries, selectedServerId]
+  );
+
+  return (
+    <div className="surface p-5 sm:p-6">
+      <div className="mb-5">
+        <p className="eyebrow">Library Mapping</p>
+        <h2 className="mt-2 text-xl font-semibold text-white">Choose a server and library</h2>
+        <p className="section-copy mt-2">
+          We keep the original Plex server mapping, so browsing and download actions stay tied to the correct source.
+        </p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Selection
+          title="Server"
+          items={serverOptions}
+          value={selectedServerId}
+          disabled={libraryData.loading}
+          placeholder="No servers available"
+          onChange={(serverId) => setSelectedServerId(serverId)}
+        />
+        <Selection
+          title="Library"
+          items={libraryOptions}
+          value={selectedLibraryId}
+          disabled={libraryData.loading || !selectedServerId}
+          placeholder="No libraries available"
+          onChange={(libraryId) => setSelectedLibraryId(libraryId)}
+        />
+      </div>
+    </div>
+  );
 }

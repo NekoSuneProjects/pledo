@@ -1,46 +1,79 @@
-﻿using Web.Models;
+using Web.Models;
 
 namespace Web.Services;
 
-public class PeriodicallySyncBackgroundService :  IHostedService, IDisposable
+public class PeriodicallySyncBackgroundService : BackgroundService
 {
+    private static readonly TimeSpan LoopDelay = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan ConnectionSyncInterval = TimeSpan.FromMinutes(5);
+
     private readonly ILogger<PeriodicallySyncBackgroundService> _logger;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ISyncService _syncService;
-    private Timer? _timer = null;
+
+    private DateTimeOffset _lastConnectionSyncAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastMediaSyncAt = DateTimeOffset.MinValue;
 
     public PeriodicallySyncBackgroundService(ILogger<PeriodicallySyncBackgroundService> logger,
-        ISyncService syncService)
+        IServiceScopeFactory scopeFactory, ISyncService syncService)
     {
         _logger = logger;
+        _scopeFactory = scopeFactory;
         _syncService = syncService;
     }
 
-    public Task StartAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogTrace("Background sync service running.");
+        _logger.LogInformation("Background sync service running.");
 
-        _timer = new Timer(DoWork, null, TimeSpan.Zero,
-            TimeSpan.FromHours(6));
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await RunScheduledSyncs(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "Automatic background sync failed.");
+            }
 
-        return Task.CompletedTask;
+            await Task.Delay(LoopDelay, stoppingToken);
+        }
     }
 
-    private void DoWork(object? state)
-    {
-        _syncService.Sync(SyncType.Connection);
-    }
-
-    public Task StopAsync(CancellationToken stoppingToken)
+    public override Task StopAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Background sync service is stopping.");
-
-        _timer?.Change(Timeout.Infinite, 0);
-
-        return Task.CompletedTask;
+        return base.StopAsync(stoppingToken);
     }
 
-    public void Dispose()
+    private async Task RunScheduledSyncs(CancellationToken stoppingToken)
     {
-        _timer?.Dispose();
+        if (_syncService.GetCurrentSyncTask() != null)
+            return;
+
+        using var scope = _scopeFactory.CreateScope();
+        var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+        var mediaSyncEnabled = await settingsService.GetAutomaticMediaSyncEnabled();
+        var mediaSyncInterval = TimeSpan.FromMinutes(await settingsService.GetAutomaticMediaSyncIntervalMinutes());
+        var now = DateTimeOffset.UtcNow;
+
+        if (mediaSyncEnabled && now - _lastMediaSyncAt >= mediaSyncInterval)
+        {
+            await _syncService.Sync(SyncType.Full);
+            _lastMediaSyncAt = DateTimeOffset.UtcNow;
+            _lastConnectionSyncAt = _lastMediaSyncAt;
+            return;
+        }
+
+        if (now - _lastConnectionSyncAt >= ConnectionSyncInterval)
+        {
+            await _syncService.Sync(SyncType.Connection);
+            _lastConnectionSyncAt = DateTimeOffset.UtcNow;
+        }
     }
 }

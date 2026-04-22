@@ -18,11 +18,11 @@ public class SyncController : ControllerBase
     }
 
     [HttpPost]
-    public async Task Sync(SyncType syncType)
+    public async Task<IActionResult> Sync(SyncType syncType)
     {
         if (_syncService.GetCurrentSyncTask() != null)
         {
-            Conflict("Sync is already ongoing");
+            return Conflict("Sync is already ongoing");
         }
 
         switch (syncType)
@@ -35,6 +35,6 @@ public class SyncController : ControllerBase
                 throw new ArgumentOutOfRangeException(nameof(syncType), syncType, null);
         }
 
-        
+        return Accepted();
     }
 }

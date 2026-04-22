@@ -61,9 +61,9 @@ export default class AccountForm extends React.Component {
             }
         }).then(response => {
             if (response.status >= 200 && response.status < 300) {
-                return response;
                 console.log(response);
                 window.location.reload();
+                return response;
             } else {
                 console.log('Somthing happened wrong');
             }

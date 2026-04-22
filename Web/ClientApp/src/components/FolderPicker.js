@@ -1,75 +1,52 @@
-import React from "react";
-import {Table} from 'reactstrap'
+import React, { useEffect, useState } from "react";
 
-export class FolderPicker extends React.Component {
-    constructor(props) {
-        super(props);
-        this.state = {
-            directories: [],
-            currentDirectory: props.currentDirectory
-        };
-        console.log("Current directory on start: " + this.state.currentDirectory)
-    }
+export function FolderPicker({ currentDirectory, onInputChange }) {
+  const [directories, setDirectories] = useState([]);
+  const [selectedDirectory, setSelectedDirectory] = useState(currentDirectory);
 
-    componentDidMount() {
-        this.getSubdirectories(this.state.currentDirectory);
-    }
+  useEffect(() => {
+    setSelectedDirectory(currentDirectory);
+    getSubdirectories(currentDirectory);
+  }, [currentDirectory]);
 
-    goBackInPath = () => {
-        this.getSubdirectories(this.parentname(this.state.currentDirectory))
-    }
+  const getSubdirectories = async (directory) => {
+    const response = directory
+      ? await fetch(`api/directory?${new URLSearchParams({ path: directory })}`)
+      : await fetch("api/directory");
+    const data = await response.json();
+    setDirectories(data.subDirectories ?? []);
+    setSelectedDirectory(data.currentDirectory);
+  };
 
-    loadSubDirectories = (directory, event) => {
-        this.getSubdirectories(directory);
-    }
+  const parentname = (path) => path.split(/[\\/]/).slice(0, -1).join("/");
+  const directoryname = (path) => path.split(/[\\/]/).slice(-1)[0];
 
-    saveCurrentDirectory = (directory, event) => {
-        if (this.prop.onInputChange)
-            this.props.onInputChange(this.state.currentDirectory);
-    }
+  return (
+    <div className="space-y-4">
+      <div className="surface-soft p-4">
+        <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Current directory</p>
+        <p className="mt-2 break-all text-sm text-white">{selectedDirectory || "Root"}</p>
+      </div>
 
-    render() {
-        return (
-            <div>
-                <Table>
-                    <thead>Directory path: {this.state.currentDirectory}</thead>
-                    <tbody>
-                    <tr
-                        onClick={this.goBackInPath}>..
-                    </tr>
-                    {this.state.directories.map((directory) =>
-                        <tr
-                            onClick={(e) => this.loadSubDirectories(directory, e)}>{this.directoryname(directory)}
-                        </tr>
-                    )}
+      <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+        <button type="button" className="btn-secondary w-full justify-start" onClick={() => getSubdirectories(parentname(selectedDirectory ?? ""))}>
+          ..
+        </button>
+        {directories.map((directory) => (
+          <button
+            key={directory}
+            type="button"
+            className="btn-secondary w-full justify-start"
+            onClick={() => getSubdirectories(directory)}
+          >
+            {directoryname(directory)}
+          </button>
+        ))}
+      </div>
 
-                    </tbody>
-                </Table>
-                <div>
-                    <button type="button" onClick={() => {
-                        if (this.props.onInputChange) {
-                            this.props.onInputChange(this.state.currentDirectory);
-                        }
-                    }}>Save
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
-    async getSubdirectories(currentDirectory) {
-        const response = currentDirectory ? await fetch('api/directory?' + new URLSearchParams({
-            path: currentDirectory
-        })) : await fetch('api/directory');
-        const data = await response.json();
-        this.setState({directories: data.subDirectories, currentDirectory: data.currentDirectory});
-    }
-
-    parentname(path) {
-        return path.split(/[\\/]/).slice(0, -1).join('/');
-    }
-
-    directoryname(path) {
-        return path.split(/[\\/]/).slice(-1);
-    }
+      <button type="button" className="btn-primary" onClick={() => onInputChange?.(selectedDirectory)}>
+        Use This Directory
+      </button>
+    </div>
+  );
 }

@@ -1,19 +1,25 @@
-import React, {useState} from "react"
+import React from "react";
 
-export function Selection(props) {
-    
-    const listItems = props.items.map((entry) =>
-        <option value={entry.value}>{entry.label}</option>
-    );
-    if (listItems.length === 0)
-        listItems.unshift(
-            <option>{props.title}</option>
-        )
+export function Selection({ title, items, value, placeholder, onChange, disabled }) {
+  const hasItems = items.length > 0;
 
-    return (
-        <div>
-            <select onChange={event => props.onChange(event.target.value)}>
-                {listItems}
-            </select>
-        </div>)
+  return (
+    <label className="block">
+      <span className="mb-2 block text-sm font-medium text-slate-200">{title}</span>
+      <select
+        className="field-select"
+        value={value ?? ""}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {!hasItems && <option value="">{placeholder ?? `No ${title.toLowerCase()} available`}</option>}
+        {hasItems &&
+          items.map((entry) => (
+            <option key={entry.value} value={entry.value}>
+              {entry.label}
+            </option>
+          ))}
+      </select>
+    </label>
+  );
 }

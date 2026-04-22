@@ -65,6 +65,26 @@ public class SettingsService : ISettingsService
         return setting?.Value;
     }
 
+    public async Task<bool> GetAutomaticMediaSyncEnabled()
+    {
+        var setting = await _unitOfWork.SettingRepository.GetById(SettingsConstants.AutomaticMediaSyncEnabledKey);
+        if (setting == null)
+            return true;
+        return bool.TryParse(setting.Value, out var enabled) ? enabled : true;
+    }
+
+    public async Task<int> GetAutomaticMediaSyncIntervalMinutes()
+    {
+        var setting = await _unitOfWork.SettingRepository.GetById(SettingsConstants.AutomaticMediaSyncIntervalMinutesKey);
+        return ParseIntSetting(setting?.Value, 15, minValue: 1);
+    }
+
+    public async Task<int> GetParallelDownloadLimit()
+    {
+        var setting = await _unitOfWork.SettingRepository.GetById(SettingsConstants.ParallelDownloadLimitKey);
+        return ParseIntSetting(setting?.Value, 1, minValue: 1);
+    }
+
     public Task<IEnumerable<SettingsResource>> GetSettings()
     {
         var settings = _unitOfWork.SettingRepository.GetAll();
@@ -128,6 +148,30 @@ public class SettingsService : ISettingsService
                 new Option("msmpeg4v2", "MS-MPEG4 V1"),
                 new Option("msmpeg4v3", "MS-MPEG4 V3"),
             };
+        if (settingsResource.Key == SettingsConstants.AutomaticMediaSyncEnabledKey)
+            settingsResource.Options = new[]
+            {
+                new Option("true", "Enabled"),
+                new Option("false", "Disabled")
+            };
+        if (settingsResource.Key == SettingsConstants.AutomaticMediaSyncIntervalMinutesKey)
+            settingsResource.Options = new[]
+            {
+                new Option("5", "Every 5 minutes"),
+                new Option("10", "Every 10 minutes"),
+                new Option("15", "Every 15 minutes"),
+                new Option("30", "Every 30 minutes"),
+                new Option("60", "Every hour"),
+                new Option("180", "Every 3 hours"),
+            };
+        if (settingsResource.Key == SettingsConstants.ParallelDownloadLimitKey)
+            settingsResource.Options = new[]
+            {
+                new Option("1", "Off (1 at a time)"),
+                new Option("2", "2 downloads"),
+                new Option("3", "3 downloads"),
+                new Option("4", "4 downloads"),
+            };
     }
 
     public Task ValidateSettings(IReadOnlyCollection<SettingsResource> settings)
@@ -170,5 +214,12 @@ public class SettingsService : ISettingsService
         await _customDbContext.Database.MigrateAsync();
         DbInitializer.Initialize(_customDbContext);
         return reset;
+    }
+
+    private static int ParseIntSetting(string? value, int fallback, int minValue)
+    {
+        if (!int.TryParse(value, out var parsed))
+            return fallback;
+        return Math.Max(minValue, parsed);
     }
 }

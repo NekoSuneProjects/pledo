@@ -1,136 +1,134 @@
-import React, {Component} from 'react';
-import {Badge, Button, Progress, Table} from "reactstrap";
+import React, { Component } from "react";
+import { humanizeByteSize } from "../utils/media";
 
 export class Downloads extends Component {
-    static displayName = Downloads.name;
+  static displayName = Downloads.name;
 
-    constructor(props) {
-        super(props);
-        this.state = {downloads: [], loading: true};
+  constructor(props) {
+    super(props);
+    this.state = { downloads: [], loading: true };
+  }
+
+  componentDidMount() {
+    this.populateData();
+    this.timerID = setInterval(() => this.populateData(), 2000);
+  }
+
+  componentWillUnmount() {
+    clearInterval(this.timerID);
+  }
+
+  async populateData() {
+    const response = await fetch("api/download");
+    const data = await response.json();
+    this.setState({ downloads: data, loading: false });
+  }
+
+  async handleCancel(key) {
+    await fetch(`api/download/${key}`, { method: "DELETE" });
+  }
+
+  async clearDownloadHistory() {
+    await fetch("api/download", { method: "DELETE" });
+    this.populateData();
+  }
+
+  renderStatus(download) {
+    if (download.started && !download.finished) {
+      return (
+        <div className="w-full max-w-[12rem]">
+          <div className="h-2 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-brand-400 transition-all"
+              style={{ width: `${Math.round((download.progress ?? 0) * 100)}%` }}
+            />
+          </div>
+          <p className="mt-2 text-xs text-slate-400">{Math.round((download.progress ?? 0) * 100)}%</p>
+        </div>
+      );
     }
 
-    componentDidMount() {
-        this.populateData();
-        this.timerID = setInterval(
-            () => this.populateData(),
-            2000
-        );
+    if (download.finishedSuccessfully) {
+      return <span className="chip">Finished</span>;
     }
 
-    componentWillUnmount() {
-        clearInterval(this.timerID);
+    if (download.finished) {
+      return <span className="chip border-rose-400/20 bg-rose-400/10 text-rose-100">Cancelled</span>;
     }
 
-    renderDownloadTable(downloads) {
-        return (
-            <Table>
-                <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>Started at</th>
-                    <th>Size</th>
-                    <th>Status</th>
-                    <th>Cancel</th>
+    return <span className="chip">Pending</span>;
+  }
+
+  renderDownloadTable(downloads) {
+    return (
+      <div className="table-wrap">
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Started</th>
+                <th>Transferred</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {downloads.map((download) => (
+                <tr key={download.id}>
+                  <td className="font-medium text-white">{download.name}</td>
+                  <td>{download.started ? new Date(download.started).toLocaleString() : "Queued"}</td>
+                  <td>
+                    {download.finished
+                      ? humanizeByteSize(download.totalBytes)
+                      : `${humanizeByteSize(download.downloadedBytes)} / ${humanizeByteSize(download.totalBytes)}`}
+                  </td>
+                  <td>{this.renderStatus(download)}</td>
+                  <td>
+                    {(download.progress == null || download.progress < 1) && !download.finished ? (
+                      <button type="button" className="btn-danger" onClick={() => this.handleCancel(download.mediaKey)}>
+                        Cancel
+                      </button>
+                    ) : (
+                      <span className="text-xs text-slate-500">No action</span>
+                    )}
+                  </td>
                 </tr>
-                </thead>
-                <tbody>
-                {downloads.map(download =>
-                    <tr key={download.id}>
-                        <td>{download.name}</td>
-                        <td>{download.started != null ? (new Date(download.started)).toLocaleString() : ""}</td>
-                        <td>{this.renderProgress(download)}</td>
-                        <td>{this.renderStatus(download)}</td>
-                        <td>
-                            {(download.progress == null || download.progress < 1) && download.finished == null ?
-                                <Button color="danger" outline size="sm"
-                                        onClick={() => this.handleClick(download.mediaKey)}>Cancel</Button>
-                                :
-                                ""}
-                        </td>
-                    </tr>
-                )}
-                </tbody>
-            </Table>
-        );
-    }
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
 
-    renderProgress(download) {
-        const downloaded = this.humanizeByteSize(download.downloadedBytes);
-        const total = this.humanizeByteSize(download.totalBytes);
-        if (!download.finished) {
-            return `${downloaded} / ${total}`
-        } else if (download.finishedSuccessfully)
-            return total;
-    }
-
-    renderStatus(download) {
-        if (download.started && !download.finished)
-            return <Progress visible={true} value={download.progress * 100}>
-                {Math.round(download.progress * 100)}%
-            </Progress>;
-        else if (download.finishedSuccessfully)
-            return <Badge color="success" pill>Finished</Badge>;
-        else if (download.finished)
-            return <Badge color="danger" pill>Cancelled</Badge>
-        else
-            return <Badge color="info" pill>Pending</Badge>;
-    }
-
-    humanizeByteSize(size) {
-        if (!size)
-            return "--";
-        const i = size === 0 ? 0 : Math.floor(Math.log(size) / Math.log(1024));
-        return (size / Math.pow(1024, i)).toFixed(2) * 1 + ' ' + ['B', 'kB', 'MB', 'GB', 'TB'][i];
-    }
-
-    handleClick(key) {
-        const settings = {
-            method: 'DELETE'
-        };
-        fetch('api/download/' + key, settings)
-            .then(response => {
-                if (response.status >= 200 && response.status < 300) {
-                    console.log("Download cancelled.");
-                } else {
-                    alert('Could not cancel download due to an unknown error.');
-                }
-            })
-    }
-
-    render() {
-        let contents = this.state.loading
-            ? <p><em>Loading...</em></p>
-            : this.renderDownloadTable(this.state.downloads);
-
-        return (
+  render() {
+    return (
+      <div className="space-y-8">
+        <section className="surface p-6 sm:p-8">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
-                <h1 id="tabelLabel">Downloads</h1>
-                <p>Your download history:</p>
-                <Button onClick={this.clearDownloadHistory.bind(this)}>Clear old download history</Button>
-                <br/>
-                {contents}
+              <p className="eyebrow">Download Queue</p>
+              <h1 className="page-title mt-3">Monitor queued, active, and finished Plex downloads.</h1>
+              <p className="section-copy mt-4 max-w-3xl">
+                This history is stored locally so you can keep track of what finished, what was cancelled, and what is
+                still moving through the queue.
+              </p>
             </div>
-        );
-    }
+            <button type="button" className="btn-secondary" onClick={() => this.clearDownloadHistory()}>
+              Clear Old History
+            </button>
+          </div>
+        </section>
 
-    async populateData() {
-        const response = await fetch('api/download');
-        const data = await response.json();
-        this.setState({downloads: data, loading: false});
-    }
-
-    clearDownloadHistory() {
-        const settings = {
-            method: 'DELETE'
-        };
-        fetch('api/download', settings)
-            .then(response => {
-                if (response.status === 204) {
-                    console.log("Reset database complete.");
-                } else {
-                    alert('Could not clear download history due to an unknown error.');
-                }
-            })
-
-    }
+        {this.state.loading ? (
+          <div className="empty-state">Loading downloads...</div>
+        ) : this.state.downloads.length === 0 ? (
+          <div className="empty-state">No downloads yet. Queue a movie, season, or episode to see activity here.</div>
+        ) : (
+          this.renderDownloadTable(this.state.downloads)
+        )}
+      </div>
+    );
+  }
 }

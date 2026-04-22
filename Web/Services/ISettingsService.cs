@@ -11,6 +11,9 @@ public interface ISettingsService
     Task<EpisodeFileTemplate> GetEpisodeFileTemplate();
     Task<string?> GetPreferredResolution();
     Task<string?> GetPreferredVideoCodec();
+    Task<bool> GetAutomaticMediaSyncEnabled();
+    Task<int> GetAutomaticMediaSyncIntervalMinutes();
+    Task<int> GetParallelDownloadLimit();
     Task<IEnumerable<SettingsResource>> GetSettings();
     Task ValidateSettings(IReadOnlyCollection<SettingsResource> settings);
     Task UpdateSettings(IReadOnlyCollection<SettingsResource> settings);

@@ -1,21 +1,27 @@
 import React from "react";
-import {FormGroup, Label, Input, InputGroup} from 'reactstrap';
 
-function DropdownSetting(props) {
-    let setting = props.setting;
-    let callback = props.callback;
-    return (
-        <FormGroup>
-            <Label for={setting.key}>{setting.name}</Label>
-            <InputGroup>
-                <Input id={setting.key} name={setting.key} type="select" value={setting.value}
-                       onChange={(e) => callback(e.target.value)}>
-                    {setting.options.map((option) => <option value={option.value} label={option.uiName}/>)}
-                </Input>
-            </InputGroup>
-            <small>{setting.description}</small>
-        </FormGroup>
-    )
+function DropdownSetting({ setting, callback }) {
+  return (
+    <div className="surface-soft p-5">
+      <label className="block">
+        <span className="mb-2 block text-sm font-medium text-slate-200">{setting.name}</span>
+        <select
+          id={setting.key}
+          name={setting.key}
+          className="field-select"
+          value={setting.value ?? ""}
+          onChange={(event) => callback(event.target.value)}
+        >
+          {(setting.options ?? []).map((option) => (
+            <option key={`${setting.key}-${option.value}`} value={option.value}>
+              {option.uiName}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="mt-3 text-sm text-slate-400">{setting.description}</p>
+    </div>
+  );
 }
 
 export default DropdownSetting;

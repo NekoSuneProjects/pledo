@@ -1,10 +1,9 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using Polly;
 using Web.Data;
 using Web.Exceptions;
 using Web.Models;
 using Web.Models.Interfaces;
-using System.Text.RegularExpressions;
 
 namespace Web.Services
 {
@@ -16,7 +15,9 @@ namespace Web.Services
         private readonly ILogger _logger;
 
         private readonly Collection<DownloadElement> _pendingDownloads;
-        private bool _isDownloading;
+        private readonly object _pendingDownloadsLock = new();
+        private readonly object _downloadManagerLock = new();
+        private Task? _downloadManagerTask;
 
         public DownloadService(HttpClient httpClient, IServiceScopeFactory scopeFactory,
             ILogger<DownloadService> logger)
@@ -38,12 +39,15 @@ namespace Web.Services
 
         public IReadOnlyCollection<DownloadElement> GetPendingDownloads()
         {
-            return _pendingDownloads;
+            lock (_pendingDownloadsLock)
+            {
+                return _pendingDownloads.ToList().AsReadOnly();
+            }
         }
 
         public IReadOnlyCollection<DownloadElement> GetAll()
         {
-            List<DownloadElement> returnList = new List<DownloadElement>(_pendingDownloads);
+            var returnList = new List<DownloadElement>(GetPendingDownloads());
             using (var scope = _scopeFactory.CreateScope())
             {
                 UnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<UnitOfWork>();
@@ -77,23 +81,28 @@ namespace Web.Services
                 IMediaElement? mediaElement = await GetMediaElement(unitOfWork, elementType, key);
                 if (mediaElement == null)
                     throw new MediaNotFoundException(key);
+
                 MediaFile? mediaFile;
                 if (mediaFileKey == null)
                     mediaFile = await SelectMediaFile(mediaElement.MediaFiles, settingsService);
                 else
                     mediaFile = mediaElement.MediaFiles.FirstOrDefault(x => x.DownloadUri == mediaFileKey);
-                if (mediaElement == null || mediaFile == null)
+
+                if (mediaFile == null)
                 {
-                    _logger.LogError("Could not prepare download of {0} due to missing media file.", mediaElement!.Title);
+                    _logger.LogError("Could not prepare download of {0} due to missing media file.", mediaElement.Title);
                     throw new ArgumentException();
                 }
+
                 var downloadDirectory = await GetDownloadDirectoryByElementType(settingsService, elementType);
                 Directory.CreateDirectory(downloadDirectory);
-                Library? library = (await unitOfWork.LibraryRepository.Get(x => x.Id == mediaElement.LibraryId, null, nameof(Library.Server)))
+                Library? library = (await unitOfWork.LibraryRepository
+                        .Get(x => x.Id == mediaElement.LibraryId, null, nameof(Library.Server)))
                     .FirstOrDefault();
                 if (library == null)
                     throw new InvalidOperationException(
                         $"Could not get related library from media {mediaElement.Title}");
+
                 Uri uri = await GetCompleteDownloadUri(library, mediaFile.DownloadUri);
                 HttpRequestMessage httpRequestMessage = new HttpRequestMessage(HttpMethod.Get, uri);
                 httpRequestMessage.Headers.Add("X-Plex-Token", library.Server.AccessToken);
@@ -107,16 +116,17 @@ namespace Web.Services
                     FileName = Path.GetFileName(mediaFile.ServerFilePath),
                     TotalBytes = mediaFile.TotalBytes,
                     MediaKey = key,
-                    RequestMessage = httpRequestMessage
+                    RequestMessage = httpRequestMessage,
+                    ServerId = library.ServerId
                 };
             }
         }
 
         private async Task<string> GetFilePath(string downloadDirectory, string serverFilePath, IMediaElement mediaElement,
-    ISettingsService settingsService)
+            ISettingsService settingsService)
         {
-            var originalFileName = PreferencesProvider.GetFilenameFromPath(serverFilePath, $"{mediaElement.Title} ({mediaElement.Year}).{mediaElement.MediaFiles.FirstOrDefault()?.Container}");
-            // Sanitize the file name to remove invalid characters
+            var originalFileName = PreferencesProvider.GetFilenameFromPath(serverFilePath,
+                $"{mediaElement.Title} ({mediaElement.Year}).{mediaElement.MediaFiles.FirstOrDefault()?.Container}");
             var sanitizedFileName = SanitizeFileName(originalFileName);
 
             if (mediaElement is Movie movie)
@@ -125,38 +135,27 @@ namespace Web.Services
                 switch (fileTemplate)
                 {
                     case MovieFileTemplate.FilenameFromServer:
-                        {
-                            // Use the downloadDirectory directly without sanitization
-                            return Path.Combine(downloadDirectory, sanitizedFileName);
-                        }
+                        return Path.Combine(downloadDirectory, sanitizedFileName);
                     case MovieFileTemplate.MovieDirectoryAndFilenameFromServer:
-                        {
-                            // Sanitize the movie title (directory name)
-                            var sanitizedMovieTitle = SanitizePath(movie.Title);
-                            return Path.Combine(downloadDirectory, sanitizedMovieTitle, sanitizedFileName);
-                        }
+                        var sanitizedMovieTitle = SanitizePath(movie.Title);
+                        return Path.Combine(downloadDirectory, sanitizedMovieTitle, sanitizedFileName);
                     default:
                         throw new ArgumentOutOfRangeException();
                 }
             }
-            else if (mediaElement is Episode episode)
+
+            if (mediaElement is Episode episode)
             {
                 var fileTemplate = await settingsService.GetEpisodeFileTemplate();
                 switch (fileTemplate)
                 {
                     case EpisodeFileTemplate.SeriesAndSeasonDirectoriesAndFilenameFromServer:
-                        {
-                            // Sanitize the series title and season number (directory names)
-                            var sanitizedSeriesTitle = SanitizePath(episode.TvShow.Title);
-                            var sanitizedSeason = SanitizePath($"Season {episode.SeasonNumber}");
-                            return Path.Combine(downloadDirectory, sanitizedSeriesTitle, sanitizedSeason, sanitizedFileName);
-                        }
+                        var sanitizedSeriesTitle = SanitizePath(episode.TvShow.Title);
+                        var sanitizedSeason = SanitizePath($"Season {episode.SeasonNumber}");
+                        return Path.Combine(downloadDirectory, sanitizedSeriesTitle, sanitizedSeason, sanitizedFileName);
                     case EpisodeFileTemplate.SeriesDirectoryAndFilenameFromServer:
-                        {
-                            // Sanitize the series title (directory name)
-                            var sanitizedSeriesTitle = SanitizePath(episode.TvShow.Title);
-                            return Path.Combine(downloadDirectory, sanitizedSeriesTitle, sanitizedFileName);
-                        }
+                        sanitizedSeriesTitle = SanitizePath(episode.TvShow.Title);
+                        return Path.Combine(downloadDirectory, sanitizedSeriesTitle, sanitizedFileName);
                     default:
                         throw new ArgumentOutOfRangeException();
                 }
@@ -165,30 +164,23 @@ namespace Web.Services
             throw new InvalidCastException("Invalid file template");
         }
 
-        //
-        // Method to sanitize file names by removing invalid characters
         private static string SanitizeFileName(string fileName)
         {
-            // Define invalid characters for file names
             char[] invalidChars = Path.GetInvalidFileNameChars();
-            // Remove invalid characters
             return string.Concat(fileName.Where(c => !invalidChars.Contains(c)));
         }
 
-        // Method to sanitize directory paths by removing invalid characters
         private static string SanitizePath(string path)
         {
-            // Define invalid characters for paths (including ':')
-            char[] invalidChars = new char[] { '<', '>', ':', '"', '/', '\\', '|', '?', '*', '\0' };
-            // Remove invalid characters
+            char[] invalidChars = { '<', '>', ':', '"', '/', '\\', '|', '?', '*', '\0' };
             return string.Concat(path.Where(c => !invalidChars.Contains(c)));
         }
 
-        private Task<Uri> GetCompleteDownloadUri(Library? library,
-            string resourceDownloadUri)
+        private Task<Uri> GetCompleteDownloadUri(Library? library, string resourceDownloadUri)
         {
             if (library == null || string.IsNullOrEmpty(library.Server.LastKnownUri))
                 throw new ArgumentException();
+
             UriBuilder uriBuilder = new UriBuilder(library.Server.LastKnownUri)
             {
                 Path = resourceDownloadUri
@@ -201,9 +193,11 @@ namespace Web.Services
             switch (elementType)
             {
                 case ElementType.Movie:
-                    return (await unitOfWork.MovieRepository.Get(x => x.RatingKey == key, includeProperties: nameof(Movie.MediaFiles))).FirstOrDefault();
+                    return (await unitOfWork.MovieRepository.Get(x => x.RatingKey == key,
+                        includeProperties: nameof(Movie.MediaFiles))).FirstOrDefault();
                 case ElementType.TvShow:
-                    return (await unitOfWork.EpisodeRepository.Get(x => x.RatingKey == key, null, nameof(Episode.TvShow) + "," + nameof(Episode.MediaFiles)))
+                    return (await unitOfWork.EpisodeRepository.Get(x => x.RatingKey == key, null,
+                            nameof(Episode.TvShow) + "," + nameof(Episode.MediaFiles)))
                         .FirstOrDefault();
                 default:
                     return null;
@@ -231,6 +225,7 @@ namespace Web.Services
                     .FirstOrDefault();
                 if (tvShow == null)
                     throw new InvalidOperationException();
+
                 var episodes = tvShow.Episodes.Where(x => x.SeasonNumber == season);
                 var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
                 foreach (Episode episode in episodes)
@@ -250,7 +245,8 @@ namespace Web.Services
                     throw new InvalidOperationException();
 
                 IEnumerable<Movie> movies = await unitOfWork.MovieRepository.Get(x => playlist.Items.Contains(x.RatingKey));
-                IEnumerable<Episode> episodes = await unitOfWork.EpisodeRepository.Get(x => playlist.Items.Contains(x.RatingKey));
+                IEnumerable<Episode> episodes =
+                    await unitOfWork.EpisodeRepository.Get(x => playlist.Items.Contains(x.RatingKey));
 
                 var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
                 foreach (Movie movie in movies)
@@ -293,6 +289,7 @@ namespace Web.Services
                     .FirstOrDefault();
                 if (tvShow == null)
                     throw new InvalidOperationException();
+
                 var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
                 foreach (Episode episode in tvShow.Episodes)
                 {
@@ -303,34 +300,47 @@ namespace Web.Services
 
         public Task CancelDownload(string mediaKey)
         {
-            var downloadElement = _pendingDownloads.FirstOrDefault(x => x.MediaKey == mediaKey);
-            if (downloadElement != null)
+            DownloadElement? downloadElement;
+            lock (_pendingDownloadsLock)
             {
-                downloadElement.CancellationTokenSource.Cancel();
+                downloadElement = _pendingDownloads.FirstOrDefault(x => x.MediaKey == mediaKey);
+                if (downloadElement == null)
+                    return Task.CompletedTask;
+
                 if (downloadElement.Started == null)
+                {
                     _pendingDownloads.Remove(downloadElement);
-                downloadElement.Finished = DateTimeOffset.Now;
+                    return Task.CompletedTask;
+                }
             }
 
+            downloadElement.CancellationTokenSource.Cancel();
+            downloadElement.Finished = DateTimeOffset.Now;
             return Task.CompletedTask;
         }
 
         private void AddToPendingDownloads(DownloadElement toDownload)
         {
-            if (_pendingDownloads.All(x => x.MediaKey != toDownload.MediaKey))
+            lock (_pendingDownloadsLock)
             {
+                if (_pendingDownloads.Any(x => x.MediaKey == toDownload.MediaKey))
+                    return;
+
                 _logger.LogInformation("Adding new element to download queue: {0}", toDownload.Name);
                 _pendingDownloads.Add(toDownload);
-                StartDownloaderIfNotActive();
             }
+
+            StartDownloaderIfNotActive();
         }
 
         private void StartDownloaderIfNotActive()
         {
-            if (!_isDownloading)
+            lock (_downloadManagerLock)
             {
-                _isDownloading = true;
-                Task.Run(async () => await DownloadQueue());
+                if (_downloadManagerTask == null || _downloadManagerTask.IsCompleted)
+                {
+                    _downloadManagerTask = Task.Run(DownloadQueue);
+                }
             }
         }
 
@@ -360,35 +370,71 @@ namespace Web.Services
 
         private async Task DownloadQueue()
         {
-            while (_pendingDownloads.Count > 0)
+            List<Task> runningDownloads = new();
+
+            while (true)
             {
-                _isDownloading = true;
-                DownloadElement downloadElement = _pendingDownloads.First();
-                _logger.LogInformation("Start download of next element in queue: {0}", downloadElement.Name);
+                var maxParallelDownloads = await GetParallelDownloadLimit();
 
-                await Preprocess(downloadElement);
-                await DownloadFile(downloadElement);
-                await Postprocess(downloadElement);
+                while (runningDownloads.Count < maxParallelDownloads && TryStartNextPendingDownload(out var downloadElement))
+                {
+                    runningDownloads.Add(ProcessDownload(downloadElement));
+                }
 
-                _logger.LogInformation("Finished download: {0}", downloadElement.Name);
+                if (runningDownloads.Count == 0)
+                {
+                    if (!HasQueuedDownloads())
+                        break;
 
-                _pendingDownloads.RemoveAt(0);
+                    await Task.Delay(250);
+                    continue;
+                }
+
+                var finishedDownload = await Task.WhenAny(runningDownloads);
+                runningDownloads.Remove(finishedDownload);
+                await finishedDownload;
             }
 
             _logger.LogInformation("No more elements in download queue.");
-
-            _isDownloading = false;
         }
 
-        private Task Preprocess(DownloadElement downloadElement)
+        private bool TryStartNextPendingDownload(out DownloadElement downloadElement)
         {
-            downloadElement.Started = DateTimeOffset.Now;
-            return Task.CompletedTask;
+            lock (_pendingDownloadsLock)
+            {
+                downloadElement = _pendingDownloads.FirstOrDefault(x => x.Started == null && x.Finished == null)!;
+                if (downloadElement == null)
+                    return false;
+
+                downloadElement.Started = DateTimeOffset.Now;
+                return true;
+            }
+        }
+
+        private bool HasQueuedDownloads()
+        {
+            lock (_pendingDownloadsLock)
+            {
+                return _pendingDownloads.Any(x => x.Started == null && x.Finished == null);
+            }
+        }
+
+        private async Task ProcessDownload(DownloadElement downloadElement)
+        {
+            _logger.LogInformation("Start download of next element in queue: {0}", downloadElement.Name);
+            await DownloadFile(downloadElement);
+            await Postprocess(downloadElement);
+            _logger.LogInformation("Finished download: {0}", downloadElement.Name);
+
+            lock (_pendingDownloadsLock)
+            {
+                _pendingDownloads.Remove(downloadElement);
+            }
         }
 
         private async Task Postprocess(DownloadElement downloadElement)
         {
-            downloadElement.Finished = DateTimeOffset.Now;
+            downloadElement.Finished ??= DateTimeOffset.Now;
             using (var scope = _scopeFactory.CreateScope())
             {
                 UnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<UnitOfWork>();
@@ -396,11 +442,8 @@ namespace Web.Services
                 await unitOfWork.Save();
             }
 
-            if (!downloadElement.FinishedSuccessfully)
-            {
-                if (File.Exists(downloadElement.FilePath))
-                    File.Delete(downloadElement.FilePath);
-            }
+            if (!downloadElement.FinishedSuccessfully && File.Exists(downloadElement.FilePath))
+                File.Delete(downloadElement.FilePath);
         }
 
         private async Task<HttpResponseMessage> SendDownloadRequest(DownloadElement downloadElement)
@@ -416,10 +459,10 @@ namespace Web.Services
                 response.EnsureSuccessStatusCode();
                 return response;
             }
-            catch (HttpRequestException e)
+            catch (HttpRequestException exception)
             {
-                _logger.LogError(e,
-                    "An error occurred while trying to access the file to download. As there might be an issue with the selected connection to the Plex media server, it will retry with different connections.");
+                _logger.LogError(exception,
+                    "An error occurred while trying to access the file to download. Retrying different Plex connections.");
             }
 
             IReadOnlyCollection<Uri> availableUris;
@@ -444,7 +487,7 @@ namespace Web.Services
             }
 
             if (response == null)
-                throw new InvalidOperationException("Cannot process download response, because there is no response.");
+                throw new InvalidOperationException("Cannot process download response because there is no response.");
 
             return response;
         }
@@ -473,15 +516,14 @@ namespace Web.Services
             {
                 _logger.LogInformation("Download of item {0} was cancelled.", downloadElement.Name);
             }
-            catch (Exception e)
+            catch (Exception exception)
             {
-                _logger.LogError(e, "An error occurred while downloading item {0}", downloadElement.Name);
+                _logger.LogError(exception, "An error occurred while downloading item {0}", downloadElement.Name);
             }
         }
 
         private static async Task CopyToAsync(Stream source, Stream destination, DownloadElement downloadElement,
-            IAsyncPolicy<int> policy,
-            int bufferSize = 0x1000)
+            IAsyncPolicy<int> policy, int bufferSize = 0x1000)
         {
             CancellationToken cancellationToken = downloadElement.CancellationTokenSource.Token;
             var buffer = new byte[bufferSize];
@@ -507,12 +549,17 @@ namespace Web.Services
                 : await settingsService.GetEpisodeDirectory();
         }
 
+        private async Task<int> GetParallelDownloadLimit()
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+            return await settingsService.GetParallelDownloadLimit();
+        }
+
         private static bool AllButIoExceptions(Exception exception)
         {
-            if (exception is IOException || exception is TaskCanceledException)
-            {
+            if (exception is IOException or TaskCanceledException)
                 return false;
-            }
 
             return true;
         }

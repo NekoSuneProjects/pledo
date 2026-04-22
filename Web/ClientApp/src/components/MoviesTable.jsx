@@ -1,51 +1,70 @@
-﻿import {Table} from "reactstrap";
-import DownloadButton from "./DownloadButton";
-import {DownloadButton2} from "./DownloadButton2";
+import { DownloadButton2 } from "./DownloadButton2";
+import { humanizeByteSize } from "../utils/media";
+import { ServerBadge } from "./ServerBadge";
 
-export function MoviesTable({items, knownServer}) {
-    const movies = items
-    return (
-        <div>
-            <Table striped>
-                <thead>
-                <tr>
-                    <th>Title</th>
-                    <th>Year</th>
-                    <th>Video Codec</th>
-                    <th>Resolution</th>
-                    <th>Size</th>
-                    <th>Download</th>
-                </tr>
-                </thead>
-                <tbody>
-                {movies.map(movie =>
-                    movie.mediaFiles.map(mediaFile =>
-                        <tr key={mediaFile.downloadUri}>
-                            <td>{movie.title}</td>
-                            <td>{movie.year}</td>
-                            <td>{mediaFile.videoCodec}</td>
-                            <td>{mediaFile.videoResolution}</td>
-                            <td>{humanizeByteSize(mediaFile.totalBytes)}</td>
-                            <td><DownloadButton2
-                                mediaType='movie'
-                                mediaKey={movie.ratingKey}
-                                mediaFileKey={mediaFile.downloadUri}
-                                mediaFile={mediaFile}
-                                knownServers={knownServer}
-                                serverId={movie.serverId}
-                                downloadBrowserPossible={true}>Download</DownloadButton2></td>
-                        </tr>)
-                )}
-                </tbody>
-            </Table>
-            <p>Total: {movies.length} items</p>
+export function MoviesTable({ items, knownServer = [], showServer = false }) {
+  const movies = items ?? [];
+  const shouldShowServer = showServer || knownServer.length > 1;
+
+  if (movies.length === 0) {
+    return <div className="empty-state">No movies matched the current selection.</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="table-wrap">
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Year</th>
+                {shouldShowServer ? <th>Server</th> : null}
+                <th>Video Codec</th>
+                <th>Resolution</th>
+                <th>Size</th>
+                <th>Download</th>
+              </tr>
+            </thead>
+            <tbody>
+              {movies.flatMap((movie) =>
+                (movie.mediaFiles ?? []).map((mediaFile, index) => (
+                  <tr key={`${movie.ratingKey}-${mediaFile.downloadUri}-${index}`}>
+                    <td>
+                      <div>
+                        <p className="font-semibold text-white">{movie.title}</p>
+                        <p className="mt-1 text-xs text-slate-400">{mediaFile.container ?? "Unknown container"}</p>
+                      </div>
+                    </td>
+                    <td>{movie.year ?? "—"}</td>
+                    {shouldShowServer ? (
+                      <td>
+                        <ServerBadge knownServers={knownServer} serverId={movie.serverId} />
+                      </td>
+                    ) : null}
+                    <td>{mediaFile.videoCodec ?? "—"}</td>
+                    <td>{mediaFile.videoResolution ?? "—"}</td>
+                    <td>{humanizeByteSize(mediaFile.totalBytes)}</td>
+                    <td>
+                      <DownloadButton2
+                        mediaType="movie"
+                        mediaKey={movie.ratingKey}
+                        mediaFileKey={mediaFile.downloadUri}
+                        knownServers={knownServer}
+                        serverId={movie.serverId}
+                        downloadBrowserPossible
+                      >
+                        Queue Download
+                      </DownloadButton2>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
-    );
-}
-
-function humanizeByteSize(size) {
-    if (!size)
-        return "--";
-    const i = size === 0 ? 0 : Math.floor(Math.log(size) / Math.log(1024));
-    return (size / Math.pow(1024, i)).toFixed(2) * 1 + ' ' + ['B', 'kB', 'MB', 'GB', 'TB'][i];
+      </div>
+      <p className="text-sm text-slate-400">Showing {movies.length} mapped movie entries.</p>
+    </div>
+  );
 }

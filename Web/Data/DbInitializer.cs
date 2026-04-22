@@ -52,6 +52,30 @@ public static class DbInitializer
             Description = "If there are multiple file versions, the one with preferred video codec is selected. If there is no match or there is no preference, first version found will be selected.",
             Type = "enum"
         });
+        context.AddSettingIfNotExist(new Setting()
+        {
+            Key = SettingsConstants.AutomaticMediaSyncEnabledKey,
+            Value = "true",
+            Name = "Automatic media sync",
+            Description = "When enabled, pledo automatically scans all reachable Plex servers in the background and detects newly added or removed movies and TV shows.",
+            Type = "enum"
+        });
+        context.AddSettingIfNotExist(new Setting()
+        {
+            Key = SettingsConstants.AutomaticMediaSyncIntervalMinutesKey,
+            Value = "15",
+            Name = "Automatic media sync interval",
+            Description = "How often pledo should rescan online Plex servers for new or removed media.",
+            Type = "enum"
+        });
+        context.AddSettingIfNotExist(new Setting()
+        {
+            Key = SettingsConstants.ParallelDownloadLimitKey,
+            Value = "1",
+            Name = "Parallel download limit",
+            Description = "Set this above 1 to allow multiple downloads at the same time. The default value 1 keeps parallel downloading off.",
+            Type = "enum"
+        });
         context.SaveChanges();
     }
 

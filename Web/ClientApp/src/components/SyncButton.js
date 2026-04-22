@@ -1,85 +1,79 @@
-import React, {Component} from 'react';
-import {Button, Spinner} from "reactstrap";
+import React, { Component } from "react";
 
 export class SyncButton extends Component {
-    constructor(props) {
-        super(props);
-        this.state = {tasks: [], loading: true};
+  constructor(props) {
+    super(props);
+    this.state = { tasks: [], loading: false };
+  }
+
+  componentDidMount() {
+    this.startSyncPolling();
+  }
+
+  componentWillUnmount() {
+    this.stopSyncPolling();
+  }
+
+  handleClick = () => {
+    this.startSync();
+  };
+
+  startSyncPolling() {
+    this.timerID = setInterval(() => this.populateTaskData(), 1000);
+  }
+
+  stopSyncPolling() {
+    clearInterval(this.timerID);
+  }
+
+  isSyncOngoing = () => this.state.tasks.some((task) => task.type === 0);
+
+  async populateTaskData() {
+    if (this.state.loading) {
+      return;
     }
 
-    componentDidMount() {
-        this.startSyncPolling();
+    this.setState({ loading: true });
+    const response = await fetch("api/task");
+    const data = await response.json();
+    const wasSyncing = this.isSyncOngoing();
+    const isSyncing = data.some((task) => task.type === 0);
+
+    if (!isSyncing && wasSyncing && this.props.whenSyncFinished) {
+      this.props.whenSyncFinished();
     }
 
-    componentWillUnmount() {
-        this.stopSyncPolling()
+    this.setState({ tasks: data, loading: false });
+  }
+
+  async startSync() {
+    try {
+      await fetch("api/sync", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+      });
+    } catch (error) {
+      console.log(error);
+      alert("There was a problem with syncing. Please try again.");
+    }
+  }
+
+  render() {
+    if (this.isSyncOngoing()) {
+      return (
+        <button type="button" className="btn-primary" disabled>
+          {this.state.tasks[0]?.name ?? "Syncing metadata..."}
+        </button>
+      );
     }
 
-    handleClick = () => {
-        this.startSync();
-    }
-
-    startSyncPolling() {
-        this.setState({loading: false});
-        this.timerID = setInterval(
-            () => this.populateTaskData(),
-            1000
-        );
-    }
-
-    stopSyncPolling() {
-        clearInterval(this.timerID);
-    }
-
-    isSyncOngoing = () => this.state.tasks.some(task => task.type === 0)
-
-    render() {
-        if (this.isSyncOngoing()) {
-            return <Button color="primary" disabled={this.isSyncOngoing()}>
-                <Spinner size="sm">Loading...</Spinner>
-                <span>{'  ' + this.state.tasks[0].name} </span>
-            </Button>
-        } else
-            return <Button color="primary" onClick={this.handleClick.bind(this)}>Sync all metadata now.</Button>
-    }
-
-    async populateTaskData() {
-        if(this.state.loading)
-            return
-        this.setState({loading: true});
-        const response = await fetch('api/task');
-        const data = await response.json();
-        const isSyncing = data.some(task => task.type === 0)
-        if (!isSyncing) {
-            this.stopSyncPolling()
-            if(this.isSyncOngoing())
-                this.whenSyncFinished()
-        }
-        this.setState({tasks: data, loading: false});
-    }
-    
-    whenSyncFinished()
-    {
-        if(this.props.whenSyncFinished)
-            this.props.whenSyncFinished();
-    }
-
-    async startSync() {
-        const settings = {
-            method: 'POST',
-            headers: {
-                Accept: 'application/json',
-                'Content-Type': 'application/json',
-            }
-        };
-        fetch('api/sync', settings)
-            .then(response => {
-                if (response.status >= 200 && response.status < 300 ||response.status === 409) {
-                    console.log(response);
-                } else {
-                    alert('There was a problem with syncing. Please try again.');
-                }
-            }).catch(err => console.log(err));
-        this.startSyncPolling();
-    }
+    return (
+      <button type="button" className="btn-primary" onClick={this.handleClick}>
+        Sync All Metadata
+      </button>
+    );
+  }
 }
